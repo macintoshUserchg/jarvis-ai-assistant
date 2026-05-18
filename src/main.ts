@@ -1682,6 +1682,46 @@ app.whenReady().then(async () => {
 
   Logger.info('🚀 [Startup] Jarvis starting up');
 
+  // Detect launch-from-DMG and Gatekeeper translocation. Running from
+  // /Volumes/<dmg>/Jarvis.app or /private/var/folders/.../AppTranslocation/
+  // means the native audio_capture / sherpa-onnx dylibs cannot be resolved
+  // (translocated path breaks @loader_path rpaths), which throws
+  // "Native audio recording not available" at hotkey startup. Show a
+  // dialog asking the user to move the app to /Applications, then quit.
+  try {
+    const exe = app.getPath('exe');
+    const launchedFromDMG = exe.includes('/Volumes/');
+    const launchedTranslocated = exe.includes('AppTranslocation');
+    if (app.isPackaged && (launchedFromDMG || launchedTranslocated)) {
+      const reason = launchedFromDMG ? 'dmg_mount' : 'app_translocation';
+      Logger.warning(`🚫 [Startup] Refusing to run from ${reason}: ${exe}`);
+      try {
+        const { posthog } = await import('./analytics/posthog');
+        posthog.capture('app_launch_blocked', { reason, exe_path_signature: exe.includes('/Volumes/') ? '<volumes>' : '<translocation>' });
+        await posthog.shutdown(1500);
+      } catch { /* analytics never blocks user message */ }
+      const { dialog, shell } = await import('electron');
+      const choice = dialog.showMessageBoxSync({
+        type: 'warning',
+        title: 'Move Jarvis to Applications',
+        message: launchedFromDMG
+          ? 'Jarvis is running from the disk image. Drag it to your Applications folder, then open it from there.'
+          : 'macOS is running Jarvis from a translocated location. Move Jarvis.app into /Applications and re-open it from there.',
+        detail: 'Jarvis needs to live in /Applications so macOS can load the native audio + transcription modules. Running from the DMG breaks the microphone.',
+        buttons: ['Open /Applications', 'Quit'],
+        defaultId: 0,
+        cancelId: 1
+      });
+      if (choice === 0) {
+        try { await shell.openPath('/Applications'); } catch { /* */ }
+      }
+      app.exit(0);
+      return;
+    }
+  } catch (err) {
+    Logger.error('🚫 [Startup] DMG check failed (non-fatal):', err);
+  }
+
   // Anonymous launch pulse. first_launch = true only when BOTH our
   // distinct_id file is absent AND there are no prior local sessions.
   // The second check prevents 1.1.x → 1.2.0 upgraders from being

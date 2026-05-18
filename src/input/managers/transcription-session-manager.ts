@@ -555,7 +555,56 @@ export class TranscriptionSessionManager {
         timestamp: new Date().toISOString()
       });
 
+      // Surface actionable native notification for the two
+      // user-correctable cases. Without this the modal we shipped in 1.3.1
+      // was the user's only clue, and PostHog shows users firing this
+      // error 20+ times in a session because there's no obvious next step.
+      const msg = error instanceof Error ? error.message : String(error);
+      const isMissingKey = msg.includes('No API keys configured') ||
+                           msg.includes('Local model not ready') ||
+                           msg.includes('No API keys available');
+      if (isMissingKey) {
+        void this.notifySetupRequired(msg);
+      }
+
       return null;
+    }
+  }
+
+  // Tracks whether we already nagged the user this session — one nudge
+  // per launch, not one per failed Fn-press.
+  private setupNotificationFired = false;
+  private async notifySetupRequired(detail: string): Promise<void> {
+    if (this.setupNotificationFired) return;
+    this.setupNotificationFired = true;
+    try {
+      const { Notification, BrowserWindow, ipcMain } = await import('electron');
+      const body = detail.includes('Local model not ready')
+        ? 'Add a cloud API key (Deepgram / OpenAI / Gemini) or finish downloading your local model.'
+        : 'Open Jarvis settings and add a Deepgram, OpenAI, or Gemini API key.';
+      if (!Notification.isSupported()) {
+        Logger.warning('[Setup] Native notifications not supported, skipping');
+        return;
+      }
+      const n = new Notification({
+        title: 'Jarvis needs setup',
+        body,
+        silent: false
+      });
+      n.on('click', () => {
+        // Focus the dashboard window + tell renderer to jump to API keys
+        const all = BrowserWindow.getAllWindows();
+        const dash = all.find(w => !w.isDestroyed());
+        if (dash) {
+          if (dash.isMinimized()) dash.restore();
+          dash.show();
+          dash.focus();
+          dash.webContents.send('app:route', { tab: 'settings', subTab: 'api-keys' });
+        }
+      });
+      n.show();
+    } catch (err) {
+      Logger.warning('[Setup] Failed to show setup notification:', err);
     }
   }
 

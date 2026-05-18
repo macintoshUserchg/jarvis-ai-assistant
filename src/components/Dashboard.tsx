@@ -218,12 +218,26 @@ const Dashboard: React.FC<DashboardProps> = ({ preloadedData }) => {
       console.error('Update error:', error.error);
     };
 
+    // Native-notification click handler from main process. Currently only
+    // routes to Settings → API Keys when transcription fails with a
+    // missing-key error. Sub-tab selection is handled inside Settings via
+    // window.__jarvisSettingsTab — set here, read on Settings mount.
+    const handleAppRoute = (_event: any, payload: { tab: string; subTab?: string }) => {
+      if (payload?.subTab) {
+        (window as any).__jarvisSettingsTab = payload.subTab;
+      }
+      if (payload?.tab === 'settings') {
+        setCurrentView('settings');
+      }
+    };
+
     // Add IPC listeners
     if (electronAPI.ipcRenderer) {
       console.log('🔧 Adding update listeners...');
       electronAPI.ipcRenderer.on('update-available', handleUpdateAvailable);
       electronAPI.ipcRenderer.on('update-progress', handleUpdateProgress);
       electronAPI.ipcRenderer.on('update-downloaded', handleUpdateDownloaded);
+      electronAPI.ipcRenderer.on('app:route', handleAppRoute);
       electronAPI.ipcRenderer.on('update-download-error', handleUpdateError);
     }
 
@@ -235,6 +249,7 @@ const Dashboard: React.FC<DashboardProps> = ({ preloadedData }) => {
         electronAPI.ipcRenderer.removeListener('update-progress', handleUpdateProgress);
         electronAPI.ipcRenderer.removeListener('update-downloaded', handleUpdateDownloaded);
         electronAPI.ipcRenderer.removeListener('update-download-error', handleUpdateError);
+        electronAPI.ipcRenderer.removeListener('app:route', handleAppRoute);
       }
     };
   }, []);

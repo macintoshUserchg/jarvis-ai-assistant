@@ -29,8 +29,19 @@ const AWS_REGIONS = [
 ];
 
 const Settings: React.FC = () => {
-  // Active tab
-  const [activeTab, setActiveTab] = useState<SettingsTab>('general');
+  // Active tab. If Dashboard asked us to jump to a specific tab via the
+  // `app:route` IPC (used by the missing-API-key system notification),
+  // it leaves the request on window.__jarvisSettingsTab.
+  const initialTab: SettingsTab = (() => {
+    const requested = (window as any).__jarvisSettingsTab;
+    if (requested === 'api-keys') {
+      try { delete (window as any).__jarvisSettingsTab; } catch { /* */ }
+      // The API key inputs live under the Transcription tab.
+      return 'transcription';
+    }
+    return 'general';
+  })();
+  const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
 
   // Settings state
   const [showNudges, setShowNudges] = useState(true);
